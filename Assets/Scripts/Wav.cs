@@ -181,7 +181,7 @@ public class Wav
 
     private class DataChunk : SubChunk
     {
-        public DataChunk(byte[] data, int off = 12) : base(data, off) { }
+        public DataChunk(byte[] data, int off = 36) : base(data, off) { }
     }
     #endregion
 
