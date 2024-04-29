@@ -81,7 +81,8 @@ public class Wav
 
         //Creat Audio Clip
         int channels = formatChunk.channels;
-        int dataLength = (fileData.Length - dataStartIndex) / (2 * channels);
+        int dataByte = formatChunk.bitsPerSample / 8;
+        int dataLength = (fileData.Length - dataStartIndex) / (dataByte * channels);
         int sampleRate = formatChunk.sampleRate;
         string fileName = FileName;
         audioClip = AudioClip.Create(fileName, dataLength, channels, sampleRate, false, OnAudioRead, OnAudioSetPosition);
