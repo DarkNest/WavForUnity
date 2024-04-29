@@ -14,7 +14,7 @@ public class Wav
 
     private AudioClip audioClip;
 
-    public AudioClip AudioClip {  get { return audioClip; } }
+    public AudioClip AudioClip { get { return audioClip; } }
 
     private string FileName
     {
@@ -35,12 +35,12 @@ public class Wav
     {
         //RIFF Chunk
         riffChunk = new RIFFChunk(fileData);
-        if(riffChunk.id != "RIFF")
+        if (riffChunk.id != "RIFF")
         {
             Debug.LogError("File is not RIFF file:" + riffChunk.id);
             return;
         }
-        if(riffChunk.type != "WAVE")
+        if (riffChunk.type != "WAVE")
         {
             Debug.LogError("File is not WAVE file:" + riffChunk.type);
             return;
@@ -48,14 +48,14 @@ public class Wav
 
         //Read Chunks
         int index = 12;
-        while (true)
+        do
         {
             SubChunk subChunk = new SubChunk(fileData, index);
-            if(subChunk.id == "JUNK")
+            if (subChunk.id == "JUNK")
             {
                 //JUNK Chunk，Skip
             }
-            if(subChunk.id == "fmt ")
+            if (subChunk.id == "fmt ")
             {
                 formatChunk = new FormatChunk(fileData, index);
             }
@@ -66,7 +66,7 @@ public class Wav
                 break;
             }
             index = subChunk.next;
-        }
+        } while (index < fileData.Length);
     }
     #endregion
 
