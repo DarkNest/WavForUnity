@@ -19,7 +19,7 @@ public class TestGUI : MonoBehaviour
 
     private void PlayAudio()
     {
-        byte[] data = File.ReadAllBytes(Application.dataPath + "/Audio/test.wav");
+        byte[] data = File.ReadAllBytes(Application.dataPath + "/Audio/test2.wav");
         Wav wav = new Wav(data);
         wav.ProcessData();
         wav.CreateAudioClip();

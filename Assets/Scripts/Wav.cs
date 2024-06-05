@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using UnityEngine;
+using UnityEngine.VFX;
 
 public class Wav
 {
@@ -12,6 +13,12 @@ public class Wav
     private int dataStartIndex;
     private int curPlayIndex = 0;
 
+    private int dataByte { get { return formatChunk.bitsPerSample / 8; } }
+    private int channels { get{ return formatChunk.channels;}}
+    private int dataLength { get{ return (fileData.Length - dataStartIndex) / (dataByte * channels);}}
+    private int sampleRate { get{ return formatChunk.sampleRate;}}
+
+
     private AudioClip audioClip;
 
     public AudioClip AudioClip { get { return audioClip; } }
@@ -20,7 +27,7 @@ public class Wav
     {
         get
         {
-            string time = System.DateTime.Now.ToString("yyyy-MM-dd,HH:mm:ss");
+            string time = System.DateTime.Now.ToString("yyyy-MM-dd,HH:mm:ss"); 
             return "temp_" + time;
         }
     }
@@ -80,9 +87,6 @@ public class Wav
         }
 
         //Creat Audio Clip
-        int channels = formatChunk.channels;
-        int dataLength = (fileData.Length - dataStartIndex) / (2 * channels);
-        int sampleRate = formatChunk.sampleRate;
         string fileName = FileName;
         audioClip = AudioClip.Create(fileName, dataLength, channels, sampleRate, false, OnAudioRead, OnAudioSetPosition);
         curPlayIndex = 0;
@@ -92,20 +96,38 @@ public class Wav
             $"Create Audio Clip: {fileName}" +
             $"\n\tformat: {formatChunk.id}" +
             $"\n\tchannel: {formatChunk.channels}" +
+            $"\n\tsampleByte: {dataByte}" +
             $"\n\tsampleRate {formatChunk.sampleRate}" +
             $"\n\ttotal: {fileData.Length}" +
             $"\n\tsample: {dataLength}" +
-            $"\n\tstartIndex: {dataStartIndex}");
+            $"\n\tstartIndex: {dataStartIndex}" +
+            $"\n\ttime:{ (int)audioClip.length / 60} min {audioClip.length % 60} s" );
     }
 
     void OnAudioRead(float[] data)
     {
-        for(int i = 0; i < data.Length; i++)
+        int maxValue = (int)Mathf.Pow(2, formatChunk.bitsPerSample - 1);
+        int sign = 1 << (formatChunk.bitsPerSample - 1);  //符号位
+
+        for (int i = 0; i < data.Length; i++)
         {
-            int dataIndex = dataStartIndex + curPlayIndex * 2;
+            int dataIndex = dataStartIndex + curPlayIndex * dataByte;
             if (dataIndex < fileData.Length - 1)
             {
-                data[i] = BytesToFloat01(fileData[dataIndex], fileData[dataIndex + 1]);
+                int byteData = 0;
+                for (int c = 0; c < dataByte; c++)
+                {
+                    int b = fileData[dataIndex + c];
+                    byteData |= (b << (c * 8));
+                }
+
+                //符号位
+                bool isNeg = (sign & byteData) != 0;
+                //负数
+                if (isNeg) byteData &= (~sign);
+                float v = byteData / (float)maxValue;
+                if (isNeg) v -= 1;
+                data[i] = v;
                 curPlayIndex++;
             }
             else
@@ -186,7 +208,8 @@ public class Wav
     #endregion
 
     #region Tools
-    private static float BytesToFloat01(byte first, byte second)
+    //(-1, 1)
+    private static float BytesToFloat(byte first, byte second)
     {
         short s = (short)((second << 8) | first);
         return s / 32768.0f;
