@@ -125,7 +125,7 @@ public class Wav
     #endregion
 
     #region Create AudioClip
-    private void CreateAudioClip()
+    public void CreateAudioClip()
     {
         if (riffChunk == null || formatChunk == null)
         {
