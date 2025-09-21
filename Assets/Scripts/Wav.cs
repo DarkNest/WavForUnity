@@ -1,22 +1,26 @@
 using System;
+using System.Drawing;
+using System.IO;
 using System.Text;
 using UnityEngine;
-using UnityEngine.VFX;
 
 public class Wav
 {
-    private byte[] fileData;
     private RIFFChunk riffChunk;
     private FormatChunk formatChunk;
     private DataChunk dataChunk;
 
-    private int dataStartIndex;
     private int curPlayIndex = 0;
 
+    public int channels => formatChunk.channels;
+    public int sampleRate => formatChunk.sampleRate;
+    public int bitsPerSample => formatChunk.bitsPerSample;
+
     private int dataByte { get { return formatChunk.bitsPerSample / 8; } }
-    private int channels { get{ return formatChunk.channels;}}
-    private int dataLength { get{ return (fileData.Length - dataStartIndex) / (dataByte * channels);}}
-    private int sampleRate { get{ return formatChunk.sampleRate;}}
+
+    private int dataLength { get{ return (dataChunk.data.Length) / (dataByte * channels);}}
+
+    public byte[] pcmData => dataChunk.data;
 
 
     private AudioClip audioClip;
@@ -27,21 +31,67 @@ public class Wav
     {
         get
         {
-            string time = System.DateTime.Now.ToString("yyyy-MM-dd,HH:mm:ss"); 
+            string time = DateTime.Now.ToString("yyyy-MM-dd,HH:mm:ss"); 
             return "temp_" + time;
         }
     }
 
-    public Wav(byte[] data)
+    private Wav() { }
+
+    /// <summary>
+    /// 从.wav文件中加载
+    /// </summary>
+    /// <param name="data">音频文件数据</param>
+    public static Wav ReadFromBytes(byte[] data)
     {
-        fileData = data;
+        Wav wav = new Wav();
+        wav.ProcessData(data);
+        wav.CreateAudioClip();
+        return wav;
     }
 
+    /// <summary>
+    /// PCM编码转换成.wav
+    /// </summary>
+    /// <param name="sampleRate"></param>
+    /// <param name="channels"></param>
+    /// <param name="bitsPerSample"></param>
+    /// <param name="pcm"></param>
+    /// <returns></returns>
+    public static Wav CreateWavFromPCM(int channels, int sampleRate, int bitsPerSample, byte[] pcm)
+    {
+        Wav wav = new Wav();
+        //riff区块
+        wav.riffChunk = new RIFFChunk();
+        //format区块
+        wav.formatChunk = new FormatChunk((short)channels, sampleRate, (short)bitsPerSample); 
+        wav.riffChunk.size += wav.formatChunk.size + 8;
+        //data区块
+        wav.dataChunk = new DataChunk(pcm);
+        wav.riffChunk.size += wav.dataChunk.size + 8;
+        return wav;
+    }
+
+    /// <summary>
+    /// 写入文件
+    /// </summary>
+    public byte[] ToFileBytes()
+    {
+        using (MemoryStream stream = new MemoryStream())
+        {
+            riffChunk.WriteBytes(stream);
+            formatChunk.WriteBytes(stream);
+            dataChunk.WriteBytes(stream);
+            return stream.ToArray();
+        }
+    }
+
+
     #region Data Chunk Process
-    public void ProcessData()
+    private void ProcessData(byte[] fileData)
     {
         //RIFF Chunk
-        riffChunk = new RIFFChunk(fileData);
+        riffChunk = new RIFFChunk(fileData, 0);
         if (riffChunk.id != "RIFF")
         {
             Debug.LogError("File is not RIFF file:" + riffChunk.id);
@@ -58,10 +108,6 @@ public class Wav
         do
         {
             SubChunk subChunk = new SubChunk(fileData, index);
-            if (subChunk.id == "JUNK")
-            {
-                //JUNK Chunk，Skip
-            }
             if (subChunk.id == "fmt ")
             {
                 formatChunk = new FormatChunk(fileData, index);
@@ -69,16 +115,17 @@ public class Wav
             if (subChunk.id == "data")
             {
                 dataChunk = new DataChunk(fileData, index);
-                dataStartIndex = index + 8;
                 break;
             }
-            index = subChunk.next;
+
+            int next = index + 8 + subChunk.size;
+            index = next;
         } while (index < fileData.Length);
     }
     #endregion
 
     #region Create AudioClip
-    public void CreateAudioClip()
+    private void CreateAudioClip()
     {
         if (riffChunk == null || formatChunk == null)
         {
@@ -98,9 +145,7 @@ public class Wav
             $"\n\tchannel: {formatChunk.channels}" +
             $"\n\tsampleByte: {dataByte}" +
             $"\n\tsampleRate {formatChunk.sampleRate}" +
-            $"\n\ttotal: {fileData.Length}" +
             $"\n\tsample: {dataLength}" +
-            $"\n\tstartIndex: {dataStartIndex}" +
             $"\n\ttime:{ (int)audioClip.length / 60} min {audioClip.length % 60} s" );
     }
 
@@ -111,13 +156,13 @@ public class Wav
 
         for (int i = 0; i < data.Length; i++)
         {
-            int dataIndex = dataStartIndex + curPlayIndex * dataByte;
-            if (dataIndex < fileData.Length - 1)
+            int dataIndex = curPlayIndex * dataByte;
+            if (dataIndex < dataChunk.data.Length - 1)
             {
                 int byteData = 0;
                 for (int c = 0; c < dataByte; c++)
                 {
-                    int b = fileData[dataIndex + c];
+                    int b = dataChunk.data[dataIndex + c];
                     byteData |= (b << (c * 8));
                 }
 
@@ -151,13 +196,27 @@ public class Wav
     {
         public string id;       //"RIFF"
         public int size;        //size:（fileSize - id - size）
-        public string type;     //"AVI" or "WAV"
+        public string type;     //"WAVE"
 
-        public RIFFChunk(byte[] data, int off = 0)
+        public RIFFChunk()
         {
-            id      = ToASCIIString(data, off + 0);
-            size    = ToInt32(data, off + 4, false);
-            type    = ToASCIIString(data, off + 8);
+            id = "RIFF";
+            size = 0;
+            type = "WAVE";
+        }
+
+        public RIFFChunk(byte[] file, int off)
+        {
+            id = Encoding.ASCII.GetString(file, off + 0, 4);
+            size = BitConverter.ToInt32(file, off + 4);
+            type = Encoding.ASCII.GetString(file, off + 8, 4);
+        }
+
+        public void WriteBytes(MemoryStream stream)
+        {
+            stream.Write(Encoding.ASCII.GetBytes(id));
+            stream.Write(BitConverter.GetBytes(size));
+            stream.Write(Encoding.ASCII.GetBytes(type));
         }
     }
 
@@ -167,14 +226,20 @@ public class Wav
     private class SubChunk
     {
         public string id;               //Chunk 类型
-        public int size;                //Chunk 大小
-        public int next;                //下一位索引
+        public int size;                //Chunk 大小(不包含id、size字段的大小)
 
-        public SubChunk(byte[] data, int off)
+        public SubChunk() { }
+
+        public SubChunk(byte[] file, int off)
         {
-            id = ToASCIIString(data, off + 0);
-            size = ToInt32(data, off + 4, false);
-            next = off + 8 + size;
+            id = Encoding.ASCII.GetString(file, off + 0, 4);
+            size = BitConverter.ToInt32(file, off + 4);
+        }
+
+        public virtual void WriteBytes(MemoryStream stream)
+        {
+            stream.Write(Encoding.ASCII.GetBytes(id));
+            stream.Write(BitConverter.GetBytes(size));
         }
     }
 
@@ -190,20 +255,64 @@ public class Wav
         public short blockAlign;        //区块对齐
         public short bitsPerSample;     //采样位数
 
-        public FormatChunk(byte[] data, int off = 12) : base(data, off)
+
+        public FormatChunk(short channels, int sampleRate, short bitsPerSample)
         {
-            format          = ToInt16(data, off +  8, false);
-            channels        = ToInt16(data, off + 10, false);
-            sampleRate      = ToInt32(data, off + 12, false);
-            byteRate        = ToInt32(data, off + 16, false);
-            blockAlign      = ToInt16(data, off + 20, false);
-            bitsPerSample   = ToInt16(data, off + 22, false);
+            id = "fmt ";
+            format = 1;
+            size = 16;
+            this.channels = channels;
+            this.sampleRate = sampleRate;
+            byteRate = sampleRate * channels * (bitsPerSample / 8);
+            blockAlign = (short)(channels * (bitsPerSample / 8));
+            this.bitsPerSample = bitsPerSample;
+        }
+
+
+        public FormatChunk(byte[] file, int off) : base(file, off)
+        {
+            format = BitConverter.ToInt16(file, off +  8);
+            channels = BitConverter.ToInt16(file, off + 10);
+            sampleRate = BitConverter.ToInt32(file, off + 12);
+            byteRate = BitConverter.ToInt32(file, off + 16);
+            blockAlign = BitConverter.ToInt16(file, off + 20);
+            bitsPerSample = BitConverter.ToInt16(file, off + 22);
+        }
+
+        public override void WriteBytes(MemoryStream stream)
+        {
+            base.WriteBytes(stream);
+            stream.Write(BitConverter.GetBytes(format));
+            stream.Write(BitConverter.GetBytes(channels));
+            stream.Write(BitConverter.GetBytes(sampleRate));
+            stream.Write(BitConverter.GetBytes(byteRate));
+            stream.Write(BitConverter.GetBytes(blockAlign));
+            stream.Write(BitConverter.GetBytes(bitsPerSample));
         }
     }
 
     private class DataChunk : SubChunk
     {
-        public DataChunk(byte[] data, int off = 36) : base(data, off) { }
+        public byte[] data;
+
+        public DataChunk(byte[] pcm)
+        {
+            id = "data";
+            size = pcm.Length;
+            data = pcm;
+        }
+
+        public DataChunk(byte[] file, int off) : base(file, off) 
+        {
+            data = new byte[size];
+            Array.Copy(file, off + 8, data, 0, size);
+        }
+
+        public override void WriteBytes(MemoryStream stream)
+        {
+            base.WriteBytes(stream);
+            stream.Write(data);
+        }
     }
     #endregion
 
@@ -213,43 +322,6 @@ public class Wav
     {
         short s = (short)((second << 8) | first);
         return s / 32768.0f;
-    }
-
-    public static string ToASCIIString(byte[] data, int index, int cnt = 4)
-    {
-        return ASCIIEncoding.ASCII.GetString(data, index, cnt);
-    }
-
-    private static short ToInt16(byte[] data, int index, bool reverse = false)
-    {
-        short v;
-        if (reverse)
-        {
-            v = (short)((data[index + 1]) | (data[index]) << 8);
-        }
-        else
-        {
-            v = BitConverter.ToInt16(data, index);
-        }
-        return v;
-    }
-
-
-    private static int ToInt32(byte[] data, int index, bool reverse = false)
-    {
-        int v;
-        if (reverse)
-        {
-            v =   (data[index + 3])
-                | (data[index + 2]  << 8)
-                | (data[index + 1]  << 16)
-                | (data[index]      << 24);
-        }
-        else
-        {
-            v = BitConverter.ToInt32(data, index);
-        }
-        return v;
     }
     #endregion
 }
